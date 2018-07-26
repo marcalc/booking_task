@@ -25,29 +25,23 @@ class StaffMemberSchedule < Dry::Struct
   extend BitMask
   include BitMask
 
-  # .new(:staff_member, :since, :till, :duration, :timezone)
   attribute :staff_member, Types::Any
   attribute :since, Types::Strict::Time
   attribute :till, Types::Strict::Time
   attribute :duration, Types.Instance(ActiveSupport::Duration)
 
-
-  delegate :start_hour_offset, :end_hour_offset, :timezone, :events, to: :staff_member
-
+  delegate :schedule, :timezone, :events, to: :staff_member
 
   def initialize *args
     super *args
     @since = since.beginning_of_day
     self.timezone ||= since.time_zone
-    @till  = self.class.round_up_to_five_minutes   till.to_time.in_time_zone(timezone)
+    @till = self.class.round_up_to_five_minutes till.to_time.in_time_zone(timezone)
   end
-
-
 
   def openings
     return free_slots_chunk.map(&:first)
   end
-
 
   def free_slots_chunk
     conflicting = {}
@@ -73,7 +67,6 @@ class StaffMemberSchedule < Dry::Struct
         map {|a, b| [since +  a * QuantSize, since + (b + 1) * QuantSize] }
   end
 
-
   #todo: change +1 second to beginning_of_next_day
   def off_work_intervals
     [since, till].
@@ -82,21 +75,22 @@ class StaffMemberSchedule < Dry::Struct
         map {|e| e.in_time_zone(staff_member.timezone) }.
         flat_map do |staff_member_tz_day|
 
-        a = [staff_member_tz_day.beginning_of_day, staff_member_tz_day + start_hour_offset]
-        b = [staff_member_tz_day + end_hour_offset, staff_member_tz_day.tomorrow.beginning_of_day]
-        [a, b]
+          weekday = weekday_from_time(staff_member_tz_day)
 
+          start_hour_offset = schedule[weekday][0]
+          end_hour_offset = schedule[weekday][1]
+
+          a = [staff_member_tz_day.beginning_of_day, staff_member_tz_day + start_hour_offset]
+          b = [staff_member_tz_day + end_hour_offset, staff_member_tz_day.tomorrow.beginning_of_day]
+
+          [a, b]
     end.
         reject {|x,y| y < since || x > till }.     # reject non-overlapping intervals
-    map {|x,y| [if x < since then since else x end, if y > till then till else y end]} # cut corners
+      map {|x,y| [if x < since then since else x end, if y > till then till else y end]} # cut corners
   end
 
-
-  # private
-
-  def staff_member_timezone_interval_wrapping_given_interval
-    [staff_member.timezone.at(since).beginning_of_day, staff_member.timezone.at(till).tomorrow.beginning_of_day]
+  def weekday_from_time(time)
+    Date::DAYNAMES[time.wday][0..2].downcase.to_sym
   end
-
 
 end
